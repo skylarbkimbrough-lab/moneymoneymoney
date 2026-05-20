@@ -1,3 +1,12 @@
+Here is your codebase with the **Natural Language Auto-Parsing Input Bot** fully integrated.
+
+### What's Changed:
+
+1. **Quick-Add Container:** Placed gracefully right at the top of the `Dashboard` screen layout so it's the first tool you see on desktop and mobile.
+2. **Interactive Live Badges:** Color-coded layout badges match your CSS custom utility palette (`--green-light`, `--red-light`, etc.).
+3. **Core Saving Engine:** The smart input ties natively into your `saveTransaction()` engine, appending structural items cleanly to your `state.transactions` array, saving to `localStorage`, updating your top-level net balance, and redrawing the active views cleanly.
+
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -145,6 +154,32 @@
   .chart-card { background: var(--surface); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-sm); border: 1px solid var(--paper-mid); }
   .chart-card h3 { font-size: 13px; font-weight: 600; color: var(--ink-mid); margin-bottom: 16px; }
   .chart-wrap { position: relative; width: 100%; }
+
+  /* Natural Language Input Styles */
+  .smart-input-card {
+    background: var(--surface); border-radius: var(--radius-lg); padding: 20px;
+    box-shadow: var(--shadow-sm); border: 1px solid var(--paper-mid); margin-bottom: 28px;
+  }
+  .smart-input-card h3 { font-size: 13px; font-weight: 600; color: var(--ink-mid); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+  .smart-box-wrap { display: flex; gap: 10px; }
+  .smart-field {
+    flex: 1; padding: 12px 16px; border-radius: 8px;
+    border: 1.5px solid var(--paper-mid); background: var(--paper);
+    font-family: 'Sora', sans-serif; font-size: 14px; color: var(--ink);
+    outline: none; transition: border-color 0.15s;
+  }
+  .smart-field:focus { border-color: var(--green); }
+  .smart-btn {
+    padding: 0 20px; border-radius: 8px; border: none; font-family: 'Sora', sans-serif;
+    font-size: 14px; font-weight: 600; background: var(--ink); color: var(--paper); cursor: pointer; transition: opacity 0.15s;
+  }
+  .smart-btn:hover { opacity: 0.9; }
+  .smart-preview { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .smart-badge { font-size: 11px; font-weight: 500; padding: 4px 10px; border-radius: 12px; display: flex; align-items: center; gap: 4px; }
+  .smart-badge.amt { background: var(--green-light); color: var(--green); }
+  .smart-badge.mch { background: var(--blue-light); color: var(--blue); }
+  .smart-badge.cat { background: var(--amber-light); color: var(--amber); }
+  .smart-badge.dat { background: var(--paper-warm); color: var(--ink-mid); }
 
   /* Budgets metrics lines */
   .budget-item { margin-bottom: 14px; }
@@ -300,6 +335,8 @@
     .card .card-amount { font-size: 22px; }
     
     .grid-3col, .grid-2 { grid-template-columns: 1fr; gap: 16px; margin-bottom: 20px; }
+    .smart-box-wrap { flex-direction: column; }
+    .smart-btn { padding: 12px; }
     
     /* Display Bottom Nav Navigation Bar */
     .mobile-nav {
@@ -507,7 +544,7 @@
         Export Ledger CSV
       </button>
     </div>
-    <div class="form-row">
+    <div class="grid-2" style="margin-bottom:0;">
       <button class="btn btn-secondary" style="width:100%; display:flex; align-items:center; justify-content:center; gap:8px;" onclick="closeActionModal(); document.getElementById('csv-import').click();">
         <svg style="width:18px; height:18px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Import Ledger CSV
@@ -534,6 +571,9 @@ let state = {
   txnType: 'expense',
   trendTab: 'monthly'
 };
+
+// Natural Language Parser Internal State Memory Cache Global Hook
+let smartParsedCache = null;
 
 // Global chart management layer references to ensure hardware redrawing loops clean up correctly
 let charts = { donut: null, bar: null, trend: null };
@@ -586,8 +626,10 @@ function deleteTransaction(id) {
 
 function setType(t) {
   state.txnType = t;
-  document.getElementById('type-expense').classList.toggle('active', t === 'expense');
-  document.getElementById('type-income').classList.toggle('active', t === 'income');
+  const expEl = document.getElementById('type-expense');
+  const incEl = document.getElementById('type-income');
+  if (expEl) expEl.classList.toggle('active', t === 'expense');
+  if (incEl) incEl.classList.toggle('active', t === 'income');
   populateCategories();
 }
 
@@ -612,6 +654,7 @@ function openModal(id = null) {
   state.editingId = id;
   const modal = document.getElementById('txn-modal');
   modal.classList.add('open');
+  populateCategories();
   
   if(id) {
     const t = state.transactions.find(x => x.id === id);
@@ -667,6 +710,116 @@ function saveTransaction() {
   }
 
   save(); closeModal(); renderView(); updateSidebarNet();
+}
+
+// ─── Natural Language Parsing Intelligence Engine ────────────────────────────
+function parseSmartInput(text) {
+  // Amount Extraction Engine Block
+  const amountRegex = /(?:.*?)\b(\d+(?:\.\d{2})?)\b/;
+  const amountMatch = text.match(amountRegex);
+  const amount = amountMatch ? parseFloat(amountMatch[1]) : 0.00;
+
+  // Date Detection Pipeline
+  let targetDate = new Date();
+  const lowerText = text.toLowerCase();
+  if (lowerText.includes('yesterday')) {
+    targetDate.setDate(targetDate.getDate() - 1);
+  } else if (lowerText.includes('last week')) {
+    targetDate.setDate(targetDate.getDate() - 7);
+  }
+  const dateString = targetDate.toISOString().split('T')[0];
+
+  // Transaction Classification Core Logic
+  let type = 'expense';
+  let detectedCategory = 'Other';
+
+  // Check income categories explicitly first
+  const incomeKeywords = { 'Salary': ['salary', 'paycheck', 'wages'], 'Freelance': ['freelance', 'gig', 'consulting'], 'Investment': ['dividend', 'crypto', 'stocks', 'investment'], 'Gift': ['gift', 'birthday'], 'Refund': ['refund', 'reimbursement'] };
+  let matchesIncome = false;
+  
+  for (let [cat, keywords] of Object.entries(incomeKeywords)) {
+    if (keywords.some(kw => lowerText.includes(kw))) {
+      detectedCategory = cat;
+      type = 'income';
+      matchesIncome = true;
+      break;
+    }
+  }
+
+  if (!matchesIncome) {
+    const expenseKeywords = { 'Food & Dining': ['grocery', 'restaurant', 'coffee', 'starbucks', 'mcdonald', 'food', 'dining', 'bar', 'trader joes', 'whole foods'], 'Transport': ['gas', 'uber', 'lyft', 'train', 'subway', 'parking', 'fuel'], 'Housing': ['rent', 'mortgage'], 'Utilities': ['electric', 'water', 'power', 'internet'], 'Subscriptions': ['netflix', 'spotify', 'hulu', 'adobe', 'icloud', 'subscription'], 'Shopping': ['amazon', 'target', 'walmart', 'clothing', 'shoes'], 'Entertainment': ['movie', 'concert', 'ticket', 'game'] };
+    for (let [cat, keywords] of Object.entries(expenseKeywords)) {
+      if (keywords.some(kw => lowerText.includes(kw))) {
+        detectedCategory = cat;
+        type = 'expense';
+        break;
+      }
+    }
+  }
+
+  // Merchant / Description Text Polishing
+  let description = text
+    .replace(/\b\d+(?:\.\d{2})?\b/g, '') // strip numbers
+    .replace(/for|at|from|yesterday|today|last week/gi, '')
+    .replace(new RegExp(detectedCategory, 'gi'), '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!description) description = type === 'income' ? 'Inward Transfer' : 'Outward Spend';
+  // Capitalize first character safely
+  description = description.charAt(0).toUpperCase() + description.slice(1);
+
+  return { amount, date: dateString, category: detectedCategory, type, name: description };
+}
+
+function handleSmartInputChange(value) {
+  if (!value.trim()) {
+    document.getElementById('smart-preview-area').style.opacity = '0.4';
+    document.getElementById('s-badge-amt').textContent = '$0.00';
+    document.getElementById('s-badge-mch').textContent = '📝 Description';
+    document.getElementById('s-badge-cat').textContent = '🏷️ Category';
+    document.getElementById('s-badge-dat').textContent = '📅 Date';
+    smartParsedCache = null;
+    return;
+  }
+  
+  document.getElementById('smart-preview-area').style.opacity = '1';
+  smartParsedCache = parseSmartInput(value);
+  
+  document.getElementById('s-badge-amt').textContent = (smartParsedCache.type === 'income' ? '+ ' : '- ') + fmt(smartParsedCache.amount);
+  document.getElementById('s-badge-mch').textContent = '📝 ' + smartParsedCache.name;
+  document.getElementById('s-badge-cat').textContent = '🏷️ ' + smartParsedCache.category;
+  document.getElementById('s-badge-dat').textContent = '📅 ' + smartParsedCache.date;
+}
+
+function commitSmartTransaction() {
+  if (!smartParsedCache || smartParsedCache.amount <= 0) {
+    alert('Please type a recognizable amount to commit a transaction.');
+    return;
+  }
+  
+  const finalTxn = {
+    id: Date.now().toString(),
+    name: smartParsedCache.name,
+    amount: smartParsedCache.amount,
+    date: smartParsedCache.date,
+    category: smartParsedCache.category,
+    type: smartParsedCache.type,
+    note: 'Added via Quick Bot Engine',
+    recurring: false,
+    recurFreq: 'monthly'
+  };
+  
+  state.transactions.push(finalTxn);
+  save();
+  
+  // Clear layout fields back to pristine states
+  const el = document.getElementById('smart-field-input');
+  if (el) el.value = '';
+  handleSmartInputChange('');
+  
+  renderView();
+  updateSidebarNet();
 }
 
 // ─── Flat Database Flat-File Transformations (CSV) ───────────────────────────
@@ -804,6 +957,21 @@ function renderDashboard() {
   const recentTxns = [...state.transactions].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
 
   return `
+  <!-- Smart Natural Language Input Interface Card Component -->
+  <div class="smart-input-card">
+    <h3>⚡ Quick Add Transaction</h3>
+    <div class="smart-box-wrap">
+      <input type="text" id="smart-field-input" class="smart-field" oninput="handleSmartInputChange(this.value)" placeholder="e.g., 14.50 at starbucks for coffee yesterday..." autocomplete="off">
+      <button class="smart-btn" onclick="commitSmartTransaction()">Log Smartly</button>
+    </div>
+    <div class="smart-preview" id="smart-preview-area" style="opacity: 0.4;">
+      <span class="smart-badge amt" id="s-badge-amt">$0.00</span>
+      <span class="smart-badge mch" id="s-badge-mch">📝 Description</span>
+      <span class="smart-badge cat" id="s-badge-cat">🏷️ Category</span>
+      <span class="smart-badge dat" id="s-badge-dat">📅 Date</span>
+    </div>
+  </div>
+
   <div class="summary-grid">
     <div class="card income">
       <div class="card-label">Income</div>
@@ -1049,10 +1217,11 @@ function buildTrendChart() {
 window.addEventListener('DOMContentLoaded', () => {
   load();
   document.getElementById('month-label').textContent = monthLabel(state.viewMonth, state.viewYear);
-  populateCategories();
   updateSidebarNet();
   showView('dashboard');
 });
 </script>
 </body>
 </html>
+
+```
